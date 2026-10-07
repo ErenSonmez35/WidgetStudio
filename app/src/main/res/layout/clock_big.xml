@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Canlı saat: TextClock sistem tarafından her dakika/saniye kendiliğinden güncellenir -->
+<TextClock xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/clock"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:fontFamily="sans-serif-medium"
+    android:includeFontPadding="false"
+    android:singleLine="true" />
