@@ -48,6 +48,9 @@ android {
     buildFeatures {
         compose = true
     }
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
     lint {
         checkReleaseBuilds = false
         abortOnError = false
@@ -68,4 +71,7 @@ dependencies {
     implementation("androidx.datastore:datastore-preferences:1.1.1")
     implementation("androidx.work:work-runtime-ktx:2.10.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303") // Android'in org.json'unun JVM karşılığı (WeatherApi testi)
 }

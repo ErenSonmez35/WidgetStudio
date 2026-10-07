@@ -2,5 +2,5 @@
 <resources>
     <string name="app_name">Widget Stüdyo</string>
     <string name="widget_label">Widget Stüdyo</string>
-    <string name="widget_desc">Uygulamada tasarladığın widget\'ı gösterir</string>
+    <string name="widget_desc">26 farklı widget türü: saat, takvim, hava, sayaç, not ve daha fazlası</string>
 </resources>

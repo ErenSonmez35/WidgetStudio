@@ -3,6 +3,8 @@ package com.eren.widgetstudio
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
@@ -19,6 +21,13 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.IconButton
+import android.widget.Toast
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -46,7 +55,7 @@ import androidx.compose.ui.unit.dp
 import com.eren.widgetstudio.data.DesignRepository
 import com.eren.widgetstudio.data.WidgetDesign
 import com.eren.widgetstudio.data.WidgetType
-import com.eren.widgetstudio.data.newDesign
+import com.eren.widgetstudio.catalog.newDesign
 import com.eren.widgetstudio.ui.AppTheme
 import com.eren.widgetstudio.ui.EditorScreen
 import com.eren.widgetstudio.ui.WidgetPreview
@@ -72,6 +81,41 @@ private fun App() {
     var showTypePicker by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<WidgetDesign?>(null) }
 
+    // Yedekleme: kullanıcının seçtiği yerel bir dosyaya yazılır / oradan okunur, ağ kullanılmaz.
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json"),
+    ) { uri ->
+        if (uri != null) scope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                runCatching {
+                    context.contentResolver.openOutputStream(uri)?.bufferedWriter()?.use {
+                        it.write(DesignRepository.exportJson(context))
+                    } ?: error("açılamadı")
+                }.isSuccess
+            }
+            Toast.makeText(context, if (ok) "Yedek kaydedildi" else "Yedek yazılamadı", Toast.LENGTH_SHORT).show()
+        }
+    }
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) scope.launch {
+            val count = withContext(Dispatchers.IO) {
+                runCatching {
+                    val text = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                    if (text == null) -1 else DesignRepository.importJson(context, text)
+                }.getOrDefault(-1)
+            }
+            designs = DesignRepository.all(context)
+            WidgetUpdater.refreshAll(context)
+            Toast.makeText(
+                context,
+                if (count < 0) "Geçerli bir Widget Stüdyo yedeği değil" else "$count tasarım yüklendi",
+                Toast.LENGTH_SHORT,
+            ).show()
+        }
+    }
+
     val current = editing
     if (current != null) {
         BackHandler { editing = null }
@@ -83,10 +127,16 @@ private fun App() {
                 designs = DesignRepository.all(context)
                 editing = null
                 scope.launch { WidgetUpdater.refreshAll(context) }
-                if (design.type == WidgetType.WEATHER) WidgetUpdater.refreshNow(context)
+                if (design.type.needsWeather) WidgetUpdater.refreshNow(context)
             },
             onCancel = { editing = null },
             onDelete = { pendingDelete = it },
+            onDuplicate = { design ->
+                DesignRepository.duplicate(context, design)
+                designs = DesignRepository.all(context)
+                editing = null
+                Toast.makeText(context, "Çoğaltıldı", Toast.LENGTH_SHORT).show()
+            },
         )
     } else {
         DesignListScreen(
@@ -96,24 +146,36 @@ private fun App() {
                 editing = it
             },
             onNew = { showTypePicker = true },
+            onExport = { exportLauncher.launch("widget-studio-yedek.json") },
+            onImport = { importLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) },
         )
     }
 
     if (showTypePicker) {
         AlertDialog(
             onDismissRequest = { showTypePicker = false },
-            title = { Text("Widget türü seç") },
+            title = { Text("Widget türü seç (${WidgetType.entries.size})") },
             text = {
-                Column {
-                    WidgetType.entries.forEach { type ->
-                        ListItem(
-                            headlineContent = { Text("${type.emoji}  ${type.label}") },
-                            modifier = Modifier.clickable {
-                                showTypePicker = false
-                                editingIsNew = true
-                                editing = newDesign(type)
-                            },
-                        )
+                LazyColumn {
+                    WidgetType.entries.groupBy { it.group }.forEach { (group, types) ->
+                        item(key = group) {
+                            Text(
+                                group,
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(top = 12.dp, bottom = 4.dp),
+                            )
+                        }
+                        items(types, key = { it.name }) { type ->
+                            ListItem(
+                                headlineContent = { Text("${type.emoji}  ${type.label}") },
+                                modifier = Modifier.clickable {
+                                    showTypePicker = false
+                                    editingIsNew = true
+                                    editing = newDesign(type)
+                                },
+                            )
+                        }
                     }
                 }
             },
@@ -153,9 +215,25 @@ private fun DesignListScreen(
     designs: List<WidgetDesign>,
     onOpen: (WidgetDesign) -> Unit,
     onNew: () -> Unit,
+    onExport: () -> Unit,
+    onImport: () -> Unit,
 ) {
+    var menuOpen by remember { mutableStateOf(false) }
     Scaffold(
-        topBar = { TopAppBar(title = { Text("Widget Stüdyo") }) },
+        topBar = {
+            TopAppBar(
+                title = { Text("Widget Stüdyo") },
+                actions = {
+                    IconButton(onClick = { menuOpen = true }) {
+                        Icon(Icons.Filled.MoreVert, contentDescription = "Menü")
+                    }
+                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        DropdownMenuItem(text = { Text("Tasarımları yedekle (dosyaya)") }, onClick = { menuOpen = false; onExport() })
+                        DropdownMenuItem(text = { Text("Yedekten yükle") }, onClick = { menuOpen = false; onImport() })
+                    }
+                },
+            )
+        },
         floatingActionButton = {
             ExtendedFloatingActionButton(
                 onClick = onNew,

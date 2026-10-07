@@ -30,17 +30,38 @@ object WeatherApi {
 
     fun current(lat: Double, lon: Double): WeatherData {
         val url = "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon" +
-            "&current=temperature_2m,weather_code" +
-            "&daily=temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=1"
-        val root = JSONObject(httpGet(url))
+            "&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m" +
+            "&daily=weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset" +
+            "&timezone=auto&forecast_days=5"
+        return parseForecast(httpGet(url))
+    }
+
+    /** Open-Meteo yanıtını [WeatherData]'ya çevirir (ağdan bağımsız, test edilebilir). */
+    fun parseForecast(body: String, now: Long = System.currentTimeMillis()): WeatherData {
+        val root = JSONObject(body)
         val current = root.getJSONObject("current")
         val daily = root.getJSONObject("daily")
+        val times = daily.getJSONArray("time")
+        val codes = daily.getJSONArray("weather_code")
+        val maxes = daily.getJSONArray("temperature_2m_max")
+        val mins = daily.getJSONArray("temperature_2m_min")
+        val days = (0 until times.length()).map { i ->
+            DayForecast(times.getString(i), codes.getInt(i), maxes.getDouble(i), mins.getDouble(i))
+        }
+        fun hhmm(key: String): String =
+            daily.optJSONArray(key)?.optString(0).orEmpty().substringAfter('T', "")
         return WeatherData(
             temp = current.getDouble("temperature_2m"),
             code = current.getInt("weather_code"),
-            max = daily.getJSONArray("temperature_2m_max").getDouble(0),
-            min = daily.getJSONArray("temperature_2m_min").getDouble(0),
-            updatedAt = System.currentTimeMillis(),
+            max = maxes.getDouble(0),
+            min = mins.getDouble(0),
+            updatedAt = now,
+            feelsLike = current.optDouble("apparent_temperature").takeUnless { it.isNaN() },
+            humidity = current.optInt("relative_humidity_2m", -1),
+            wind = current.optDouble("wind_speed_10m", -1.0),
+            sunrise = hhmm("sunrise"),
+            sunset = hhmm("sunset"),
+            daily = days,
         )
     }
 
